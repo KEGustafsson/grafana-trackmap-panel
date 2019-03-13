@@ -34,7 +34,10 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.hoverMarker = null;
     this.hoverTarget = null;
     this.setSizePromise = null;
-
+	this.marker = null;
+	this.last = null;
+	this.refresh = 0;
+	this.layerGroup = null;
     // Panel events
     this.events.on('panel-initialized', this.onInitialized.bind(this));
     this.events.on('view-mode-changed', this.onViewModeChanged.bind(this));
@@ -112,19 +115,14 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     if (!exact && idx > 0 && this.coords[idx].timestamp > this.hoverTarget) {
       idx--;
     }
-    this.hoverMarker.setLatLng(this.coords[idx].position);
+    this.hoverMarker.setLatLng(this.coords[idx].position).bindPopup(
+			'<b>' + "Target" + '</b>' + '<br \>' + "Lat: " + this.coords[idx].lat_show + ", Lon: " + this.coords[idx].lon_show + '<br \>' + moment(this.coords[idx].timestamp).lang("fi").format('DoM.YYYY, HH:mm:ss'));
   }
 
   onPanelClear(evt) {
     log("onPanelClear");
     // clear the highlighted circle
     this.hoverTarget = null;
-    if (this.hoverMarker) {
-      this.hoverMarker.setStyle({
-        fillColor: 'none',
-        color: 'none'
-      });
-    }
   }
 
   onViewModeChanged(){
@@ -165,25 +163,46 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       scrollWheelZoom: false,
       zoomSnap: 0.5,
       zoomDelta: 1,
+	  maxZoom: 18,
     });
 
     // Define layers and add them to the control widget
-    L.control.layers({
+    L.control.layers({  
+      'OpenStreetMap Sea': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: 'OpenStreetMap with Seamarks',
+        maxZoom: 18,
+		forcedOverlay: L.tileLayer('http://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+        })
+      }),
       'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        maxZoom: 19
-      }).addTo(this.leafMap), // Add default layer to map
+        attribution: 'OpenStreetMap',
+        maxZoom: 18
+      }),
+      'OpenTopoMap Sea': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+        attribution: 'OpenTopoMap with Seamarks',
+        maxZoom: 18,
+		forcedOverlay: L.tileLayer('http://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+        })
+      }),
       'OpenTopoMap': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-        attribution: 'Map data: &copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)',
-        maxZoom: 17
+        attribution: 'OpenTopoMap',
+        maxZoom: 18
+      }),
+      'Carto Dark Sea': L.tileLayer('https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png', {
+        attribution: 'Carto Dark with Seamarks',
+        maxZoom: 18,
+		forcedOverlay: L.tileLayer('http://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+        })
+      }),
+      'Carto Dark': L.tileLayer('https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png', {
+        attribution: 'Carto Dark',
+        maxZoom: 18
       }),
       'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Imagery &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+        attribution: 'SatelliteMap',
         // This map doesn't have labels so we force a label-only layer on top of it
         forcedOverlay: L.tileLayer('https://stamen-tiles-{s}.a.ssl.fastly.net/toner-labels/{z}/{x}/{y}.png', {
-          attribution: 'Labels by <a href="http://stamen.com">Stamen Design</a>, <a href="http://creativecommons.org/licenses/by/3.0">CC BY 3.0</a> &mdash; Map data &copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-          subdomains: 'abcd',
-          maxZoom: 20,
+        maxZoom: 18
         })
       })
     }).addTo(this.leafMap);
@@ -248,11 +267,34 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.polyline = L.polyline(
       this.coords.map(x => x.position, this), {
         color: this.panel.lineColor,
-        weight: 3,
+        weight: 4,
       }
     ).addTo(this.leafMap);
+    if (this.refresh == 0) {
+		this.zoomToFit();
+		this.layerGroup = L.layerGroup().addTo(this.leafMap);
+		this.refresh = 1;
+	}
 
-    this.zoomToFit();
+  }	
+  
+  addDataToMap_last() {
+	this.layerGroup.clearLayers();
+
+	var boatIcon = L.icon({
+		iconUrl: 'public/plugins/pr0ps-trackmap-panel/leaflet/images/boat.png',
+		iconSize: [70, 34], // size of the icon
+	});
+	var normalIcon = L.icon({
+              iconUrl: 'public/plugins/pr0ps-trackmap-panel/leaflet/images/marker-icon.png',
+              iconSize: [6, 10] // size of the icon
+    });
+    
+	var boatName = "Target";
+	this.marker = L.marker(this.coords[this.last].position, {
+		icon: boatIcon
+		}).addTo(this.layerGroup).bindPopup(
+			'<b>' + boatName + '</b>' + '<br \>' + "Lat: " + this.coords[this.last].lat_show + ", Lon: " + this.coords[this.last].lon_show + '<br \>' + moment(this.coords[this.last].timestamp).lang("fi").format('DoM.YYYY, HH:mm:ss'));
   }
 
   zoomToFit(){
@@ -288,6 +330,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.coords.length = 0;
     const lats = data[0].datapoints;
     const lons = data[1].datapoints;
+	this.last = lats.length - 1; //new
     for (let i = 0; i < lats.length; i++) {
       if (lats[i][0] == null || lons[i][0] == null ||
           lats[i][1] !== lats[i][1]) {
@@ -296,10 +339,13 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
 
       this.coords.push({
         position: L.latLng(lats[i][0], lons[i][0]),
-        timestamp: lats[i][1]
+        timestamp: lats[i][1],
+		lat_show: lats[i][0],
+		lon_show: lons[i][0]
       });
     }
     this.addDataToMap();
+	this.addDataToMap_last();
   }
 
   onDataSnapshotLoad(snapshotData) {
