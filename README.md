@@ -7,4 +7,4 @@ Features
 --------
 - More base maps + sea chart marks
 - Last location marked with boat icon
-- Hover location includes recorded data (hover is not cleared after mouse is away from map area)
+- Last and hover point locations include recorded data, pop-up (hover is not cleared after mouse is away from map area)
