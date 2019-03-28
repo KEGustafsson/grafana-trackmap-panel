@@ -6,5 +6,5 @@ Forked from https://github.com/pR0Ps/grafana-trackmap-panel
 Features
 --------
 - More base maps + sea chart marks
-- Last location marked with icon (boat, targer for marine usage)
+- Last location marked with icon (boat, target for marine usage)
 - Last and hover point locations include recorded data, pop-up (hover is not cleared after mouse is away from map area)
