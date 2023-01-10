@@ -171,7 +171,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       'OpenStreetMap Sea': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: 'OpenStreetMap with Seamarks',
         maxZoom: 18,
-		forcedOverlay: L.tileLayer('http://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+		forcedOverlay: L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
         })
       }),
       'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -181,7 +181,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       'OpenTopoMap Sea': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
         attribution: 'OpenTopoMap with Seamarks',
         maxZoom: 18,
-		forcedOverlay: L.tileLayer('http://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+		forcedOverlay: L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
         })
       }),
       'OpenTopoMap': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
@@ -191,7 +191,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       'Carto Dark Sea': L.tileLayer('https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png', {
         attribution: 'Carto Dark with Seamarks',
         maxZoom: 18,
-		forcedOverlay: L.tileLayer('http://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+		forcedOverlay: L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
         })
       }),
       'Carto Dark': L.tileLayer('https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png', {
