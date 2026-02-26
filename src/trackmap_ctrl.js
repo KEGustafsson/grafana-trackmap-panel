@@ -13,6 +13,96 @@ function log(msg) {
   //console.log(msg);
 }
 
+function hasHeadingValue(heading) {
+  return heading != null && isFinite(heading);
+}
+
+function normalizeHeading(heading) {
+  if (!hasHeadingValue(heading)) {
+    return null;
+  }
+  return ((heading % 360) + 360) % 360;
+}
+
+function headingMatchesTimestamp(headingPoint, targetTimestamp, toleranceMs = 1000) {
+  if (!headingPoint || headingPoint[0] == null || headingPoint[1] == null || targetTimestamp == null) {
+    return false;
+  }
+  return Math.abs(headingPoint[1] - targetTimestamp) <= toleranceMs;
+}
+
+function getNearestHeadingValue(headings, targetTimestamp, toleranceMs = 1000) {
+  if (!headings || headings.length === 0 || targetTimestamp == null) {
+    return null;
+  }
+
+  let min = 0;
+  let max = headings.length - 1;
+
+  while (min <= max) {
+    const idx = Math.floor((min + max) / 2);
+    const ts = headings[idx][1];
+    if (ts === targetTimestamp) {
+      return headings[idx][0];
+    } else if (ts < targetTimestamp) {
+      min = idx + 1;
+    } else {
+      max = idx - 1;
+    }
+  }
+
+  let best = null;
+  let bestDiff = Infinity;
+  [max, min].forEach((idx) => {
+    if (idx >= 0 && idx < headings.length) {
+      const diff = Math.abs(headings[idx][1] - targetTimestamp);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = headings[idx][0];
+      }
+    }
+  });
+
+  return bestDiff <= toleranceMs ? best : null;
+}
+
+function getMapViewStorage() {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage;
+    }
+  } catch (err) {
+    // ignore localStorage access errors
+  }
+  return null;
+}
+
+function makeDirectionIcon(color, heading, isHover) {
+  const normalizedHeading = normalizeHeading(heading);
+  const hasHeading = normalizedHeading != null;
+  const size = hasHeading ? (isHover ? 28 : 24) : (isHover ? 20 : 16);
+  const anchor = Math.round(size / 2);
+  const strokeWidth = isHover ? 2 : 1.5;
+
+  let html = '';
+  if (hasHeading) {
+    html = `<div style="width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;transform:rotate(${normalizedHeading}deg);">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">
+        <path d="M12 1 L19.5 22 L12 17.5 L4.5 22 Z" fill="${color}" stroke="white" stroke-width="${strokeWidth}" />
+      </svg>
+    </div>`;
+  } else {
+    html = `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 0 0 1px rgba(0,0,0,0.35);"></div>`;
+  }
+
+  return L.divIcon({
+    className: 'trackmap-direction-marker',
+    html,
+    iconSize: [size, size],
+    iconAnchor: [anchor, anchor],
+  });
+}
+
 function getAntimeridianMidpoints(start, end) {
   // See https://stackoverflow.com/a/65870755/369977
   if (Math.abs(start.lng - end.lng) <= 180.0){
@@ -39,9 +129,11 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     _.defaults(this.panel, {
       maxDataPoints: 500,
       autoZoom: true,
+      defaultZoom: null,
       scrollWheelZoom: false,
       defaultLayer: 'OpenStreetMap',
       showLayerChanger: true,
+      showLastMarker: true,
       lineColor: 'red',
       pointColor: 'royalblue',
     });
@@ -50,11 +142,11 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.layers = {
       'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        maxZoom: 19
+        maxZoom: 18
       }),
       'OpenTopoMap': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
         attribution: 'Map data: &copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)',
-        maxZoom: 17
+        maxZoom: 18
       }),
       'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
         attribution: 'Imagery &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
@@ -62,14 +154,22 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
         forcedOverlay: L.tileLayer('https://stamen-tiles-{s}.a.ssl.fastly.net/toner-labels/{z}/{x}/{y}.png', {
           attribution: 'Labels by <a href="http://stamen.com">Stamen Design</a>, <a href="http://creativecommons.org/licenses/by/3.0">CC BY 3.0</a> &mdash; Map data &copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
           subdomains: 'abcd',
-          maxZoom: 20,
+          maxZoom: 18,
         })
+      }),
+      'Traficom S57 WMS': L.tileLayer.wms('https://julkinen.traficom.fi/s57/wms', {
+        layers: 'cells',
+        format: 'image/png',
+        transparent: true,
+        version: '1.1.1',
+        attribution: '&copy; Traficom',
+        maxZoom: 24,
       }),
       'Eniro Seamap': L.tileLayer('https://{s}.eniro.com/geowebcache/service/tms1.0.0/nautical/{z}/{x}/{y}.png', {
         subdomains: ['map01', 'map02', 'map03', 'map04'],
         attribution: '&copy; Kort & Matrikelstyrelsen',
         tms: true,
-        maxZoom: 17,
+        maxZoom: 18,
       })
     };
 
@@ -81,6 +181,9 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.polylines = [];
     this.hoverMarker = null;
     this.hoverTarget = null;
+    this.hoverIndex = null;
+    this.lastMarker = null;
+    this.last = null;
     this.setSizePromise = null;
 
     // Panel events
@@ -99,6 +202,65 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       this.dashboard.events.on(DataHoverEvent.type, this.onPanelHover.bind(this), $scope);
       this.dashboard.events.on(DataHoverClearEvent.type, this.onPanelClear.bind(this), $scope);
     } catch(err){ /* expected for Grafana v7.x.x */ }
+  }
+
+  getViewStorageKey() {
+    const dashboardId = this.dashboard?.uid || this.dashboard?.id || 'unknown';
+    return `trackmap:view:${dashboardId}:${this.panel.id}`;
+  }
+
+  getConfiguredDefaultZoom() {
+    if (this.panel.defaultZoom == null || this.panel.defaultZoom === '') {
+      return null;
+    }
+
+    const zoom = Number(this.panel.defaultZoom);
+    if (!isFinite(zoom)) {
+      return null;
+    }
+
+    return zoom;
+  }
+
+  saveCurrentMapView() {
+    if (!this.leafMap || this.panel.autoZoom) {
+      return;
+    }
+
+    const center = this.leafMap.getCenter();
+    const zoom = this.leafMap.getZoom();
+    const storage = getMapViewStorage();
+    if (!storage || !isFinite(center.lat) || !isFinite(center.lng) || !isFinite(zoom)) {
+      return;
+    }
+
+    storage.setItem(this.getViewStorageKey(), JSON.stringify({
+      lat: center.lat,
+      lng: center.lng,
+      zoom: zoom,
+    }));
+  }
+
+  loadSavedMapView() {
+    const storage = getMapViewStorage();
+    if (!storage) {
+      return null;
+    }
+
+    const raw = storage.getItem(this.getViewStorageKey());
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || !isFinite(parsed.lat) || !isFinite(parsed.lng) || !isFinite(parsed.zoom)) {
+        return null;
+      }
+      return parsed;
+    } catch (err) {
+      return null;
+    }
   }
 
   onRefresh(){
@@ -202,6 +364,8 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     if (!exact && idx > 0 && this.coords[idx].timestamp > this.hoverTarget) {
       idx--;
     }
+    this.hoverIndex = idx;
+    this.hoverMarker.setIcon(makeDirectionIcon(this.panel.pointColor, this.coords[idx].heading, true));
     this.hoverMarker.setLatLng(this.coords[idx].position);
     this.render();
   }
@@ -210,6 +374,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     log("onPanelClear");
     // clear the highlighted circle
     this.hoverTarget = null;
+    this.hoverIndex = null;
     if (this.hoverMarker) {
       this.hoverMarker.removeFrom(this.leafMap);
     }
@@ -265,6 +430,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     // Create the map or get it back in a clean state if it already exists
     if (this.leafMap) {
       this.polylines.forEach(p=>p.removeFrom(this.leafMap));
+      this.removeLastMarker();
       this.onPanelClear();
       return;
     }
@@ -275,6 +441,14 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       zoomSnap: 0.5,
       zoomDelta: 1,
     });
+
+    const savedView = this.loadSavedMapView();
+    const defaultZoom = this.getConfiguredDefaultZoom();
+    if (!this.panel.autoZoom && savedView) {
+      this.leafMap.setView([savedView.lat, savedView.lng], savedView.zoom);
+    } else {
+      this.leafMap.setView([0, 0], defaultZoom != null ? defaultZoom : 1);
+    }
 
     // Create the layer changer
     this.layerChanger = L.control.layers(this.layers)
@@ -288,17 +462,42 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.layers[this.panel.defaultLayer].addTo(this.leafMap);
 
     // Hover marker
-    this.hoverMarker = L.circleMarker(L.latLng(0, 0), {
-      color: 'white',
-      fillColor: this.panel.pointColor,
-      fillOpacity: 1,
-      weight: 2,
-      radius: 7
+    this.hoverMarker = L.marker(L.latLng(0, 0), {
+      icon: makeDirectionIcon(this.panel.pointColor, null, true),
+      opacity: 1,
+      zIndexOffset: 2000,
     });
 
     // Events
     this.leafMap.on('baselayerchange', this.mapBaseLayerChange.bind(this));
     this.leafMap.on('boxzoomend', this.mapZoomToBox.bind(this));
+    this.leafMap.on('moveend', this.saveCurrentMapView.bind(this));
+    this.leafMap.on('zoomend', this.saveCurrentMapView.bind(this));
+  }
+
+  removeLastMarker() {
+    if (this.lastMarker) {
+      this.lastMarker.removeFrom(this.leafMap);
+      this.lastMarker = null;
+    }
+  }
+
+  updateLastMarker() {
+    this.removeLastMarker();
+
+    if (!this.panel.showLastMarker || this.last == null || !this.coords[this.last]) {
+      return;
+    }
+
+    this.lastMarker = L.marker(this.coords[this.last].position, {
+      icon: makeDirectionIcon(this.panel.pointColor, this.coords[this.last].heading, false),
+      zIndexOffset: 1000,
+    }).addTo(this.leafMap);
+  }
+
+  refreshLastMarker() {
+    this.updateLastMarker();
+    this.render();
   }
 
   mapBaseLayerChange(e) {
@@ -358,6 +557,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
         ).addTo(this.leafMap)
       );
     }
+    this.updateLastMarker();
     this.zoomToFit();
   }
 
@@ -366,12 +566,17 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     if (this.panel.autoZoom && this.polylines.length>0){
       var bounds = this.polylines[0].getBounds();
       this.polylines.forEach(p => bounds.extend(p.getBounds()));
+      const defaultZoom = this.getConfiguredDefaultZoom();
 
       if (bounds.isValid()){
-        this.leafMap.fitBounds(bounds);
+        if (defaultZoom != null) {
+          this.leafMap.fitBounds(bounds, { maxZoom: defaultZoom });
+        } else {
+          this.leafMap.fitBounds(bounds);
+        }
       }
       else {
-        this.leafMap.setView([0, 0], 1);
+        this.leafMap.setView([0, 0], defaultZoom != null ? defaultZoom : 1);
       }
     }
     this.render();
@@ -384,11 +589,10 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
         color: this.panel.lineColor
       })
     });
-    if (this.hoverMarker){
-      this.hoverMarker.setStyle({
-        fillColor: this.panel.pointColor,
-      });
+    if (this.hoverMarker && this.hoverIndex != null && this.coords[this.hoverIndex]) {
+      this.hoverMarker.setIcon(makeDirectionIcon(this.panel.pointColor, this.coords[this.hoverIndex].heading, true));
     }
+    this.updateLastMarker();
     this.render();
   }
 
@@ -396,9 +600,10 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     log("onDataReceived");
     this.setupMap();
 
-    if (data.length === 0 || data.length !== 2) {
+    if (!data || data.length === 0 || (data.length !== 2 && data.length !== 3)) {
       // No data or incorrect data, show a world map and abort
-      this.leafMap.setView([0, 0], 1);
+      const defaultZoom = this.getConfiguredDefaultZoom();
+      this.leafMap.setView([0, 0], defaultZoom != null ? defaultZoom : 1);
       this.render();
       return;
     }
@@ -410,13 +615,18 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.coordSlices.push(0)
     const lats = data[0].datapoints;
     const lons = data[1].datapoints;
-    for (let i = 0; i < lats.length; i++) {
+    const headings = data.length === 3 ? data[2].datapoints.filter((p) => p && p[0] != null && p[1] != null) : null;
+    const pointCount = Math.min(lats.length, lons.length);
+    this.last = null;
+
+    for (let i = 0; i < pointCount; i++) {
       if (lats[i][0] == null || lons[i][0] == null ||
           (lats[i][0] == 0 && lons[i][0] == 0) ||
           lats[i][1] !== lons[i][1]) {
         continue;
       }
       const pos = L.latLng(lats[i][0], lons[i][0])
+      let heading = headings ? getNearestHeadingValue(headings, lats[i][1]) : null;
 
       if (this.coords.length > 0){
         // Deal with the line between last point and this one crossing the antimeridian:
@@ -439,8 +649,12 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
 
       this.coords.push({
         position: pos,
-        timestamp: lats[i][1]
+        timestamp: lats[i][1],
+        lat_show: lats[i][0],
+        lon_show: lons[i][0],
+        heading: heading,
       });
+      this.last = this.coords.length - 1;
 
     }
     this.coordSlices.push(this.coords.length)
