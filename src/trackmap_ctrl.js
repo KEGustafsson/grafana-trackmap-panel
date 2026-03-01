@@ -468,6 +468,9 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       zIndexOffset: 2000,
     });
 
+    // Scale control at bottom of map
+    L.control.scale({ position: 'bottomleft', metric: true, imperial: true }).addTo(this.leafMap);
+
     // Events
     this.leafMap.on('baselayerchange', this.mapBaseLayerChange.bind(this));
     this.leafMap.on('boxzoomend', this.mapZoomToBox.bind(this));
@@ -489,10 +492,27 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       return;
     }
 
-    this.lastMarker = L.marker(this.coords[this.last].position, {
-      icon: makeDirectionIcon(this.panel.pointColor, this.coords[this.last].heading, false),
+    const coord = this.coords[this.last];
+    this.lastMarker = L.marker(coord.position, {
+      icon: makeDirectionIcon(this.panel.pointColor, coord.heading, false),
       zIndexOffset: 1000,
     }).addTo(this.leafMap);
+
+    const lat = coord.lat_show != null ? coord.lat_show : coord.position.lat;
+    const lon = coord.lon_show != null ? coord.lon_show : coord.position.lng;
+    let tooltipLines = [
+      `<b>Last Position</b>`,
+      `Lat: ${lat.toFixed(6)}`,
+      `Lon: ${lon.toFixed(6)}`,
+    ];
+    if (hasHeadingValue(coord.heading)) {
+      tooltipLines.push(`Heading: ${normalizeHeading(coord.heading).toFixed(1)}\u00b0`);
+    }
+    this.lastMarker.bindTooltip(tooltipLines.join('<br>'), {
+      direction: 'top',
+      offset: [0, -12],
+      className: 'trackmap-last-tooltip',
+    });
   }
 
   refreshLastMarker() {
