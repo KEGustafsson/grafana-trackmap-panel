@@ -229,7 +229,17 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
         attribution: '&copy; Kort & Matrikelstyrelsen',
         tms: true,
         maxZoom: 18,
-      })
+      }),
+      'Google Satellite': L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+        attribution: '&copy; Google',
+        subdomains: ['0', '1', '2', '3'],
+        maxZoom: 21,
+      }),
+      'Google Satellite Hybrid': L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+        attribution: '&copy; Google',
+        subdomains: ['0', '1', '2', '3'],
+        maxZoom: 21,
+      }),
     };
 
     this.timeSrv = $injector.get('timeSrv');
