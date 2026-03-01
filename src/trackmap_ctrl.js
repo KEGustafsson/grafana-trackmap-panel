@@ -103,6 +103,65 @@ function makeDirectionIcon(color, heading, isHover) {
   });
 }
 
+const METERS_PER_NM = 1852;
+
+function makeScaleControl(options) {
+  const ScaleControl = L.Control.extend({
+    options: L.extend({ position: 'bottomleft', maxWidth: 150 }, options),
+
+    onAdd(map) {
+      this._map = map;
+      const container = L.DomUtil.create('div', 'leaflet-control-scale trackmap-scale');
+      this._nmScale = L.DomUtil.create('div', 'leaflet-control-scale-line', container);
+      this._mScale  = L.DomUtil.create('div', 'leaflet-control-scale-line', container);
+      map.on('zoomend move', this._update, this);
+      this._update();
+      return container;
+    },
+
+    onRemove(map) {
+      map.off('zoomend move', this._update, this);
+    },
+
+    _update() {
+      const map = this._map;
+      const y = map.getSize().y / 2;
+      const maxMeters = map.distance(
+        map.containerPointToLatLng([0, y]),
+        map.containerPointToLatLng([this.options.maxWidth, y])
+      );
+      if (!isFinite(maxMeters) || maxMeters <= 0) { return; }
+
+      // Nautical miles
+      const nm = this._roundNum(maxMeters / METERS_PER_NM);
+      this._setBar(this._nmScale, this._fmtNM(nm), (nm * METERS_PER_NM) / maxMeters);
+
+      // Metric
+      const m = this._roundNum(maxMeters);
+      this._setBar(this._mScale, m < 1000 ? `${m} m` : `${m / 1000} km`, m / maxMeters);
+    },
+
+    _setBar(el, label, ratio) {
+      el.style.width = `${Math.round(this.options.maxWidth * ratio)}px`;
+      el.innerHTML = label;
+    },
+
+    _roundNum(num) {
+      const pow10 = Math.pow(10, Math.floor(Math.log(num) / Math.LN10));
+      const d = num / pow10;
+      return pow10 * (d >= 10 ? 10 : d >= 5 ? 5 : d >= 3 ? 3 : d >= 2 ? 2 : 1);
+    },
+
+    _fmtNM(nm) {
+      // Avoid floating-point display artefacts (e.g. 0.30000000000000004)
+      const clean = parseFloat(nm.toPrecision(4));
+      return `${clean} nm`;
+    },
+  });
+
+  return new ScaleControl(options);
+}
+
 function getAntimeridianMidpoints(start, end) {
   // See https://stackoverflow.com/a/65870755/369977
   if (Math.abs(start.lng - end.lng) <= 180.0){
@@ -468,6 +527,9 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       zIndexOffset: 2000,
     });
 
+    // Scale control – nautical miles (top) and metric (bottom)
+    makeScaleControl({ position: 'bottomleft', maxWidth: 150 }).addTo(this.leafMap);
+
     // Events
     this.leafMap.on('baselayerchange', this.mapBaseLayerChange.bind(this));
     this.leafMap.on('boxzoomend', this.mapZoomToBox.bind(this));
@@ -489,10 +551,27 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       return;
     }
 
-    this.lastMarker = L.marker(this.coords[this.last].position, {
-      icon: makeDirectionIcon(this.panel.pointColor, this.coords[this.last].heading, false),
+    const coord = this.coords[this.last];
+    this.lastMarker = L.marker(coord.position, {
+      icon: makeDirectionIcon(this.panel.pointColor, coord.heading, false),
       zIndexOffset: 1000,
     }).addTo(this.leafMap);
+
+    const lat = coord.lat_show != null ? coord.lat_show : coord.position.lat;
+    const lon = coord.lon_show != null ? coord.lon_show : coord.position.lng;
+    let tooltipLines = [
+      `<b>Last Position</b>`,
+      `Lat: ${lat.toFixed(6)}`,
+      `Lon: ${lon.toFixed(6)}`,
+    ];
+    if (hasHeadingValue(coord.heading)) {
+      tooltipLines.push(`Heading: ${normalizeHeading(coord.heading).toFixed(1)}\u00b0`);
+    }
+    this.lastMarker.bindTooltip(tooltipLines.join('<br>'), {
+      direction: 'top',
+      offset: [0, -12],
+      className: 'trackmap-last-tooltip',
+    });
   }
 
   refreshLastMarker() {
