@@ -292,7 +292,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
   }
 
   saveCurrentMapView() {
-    if (!this.leafMap || this.panel.autoZoom) {
+    if (!this.leafMap) {
       return;
     }
 
@@ -513,7 +513,9 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
 
     const savedView = this.loadSavedMapView();
     const defaultZoom = this.getConfiguredDefaultZoom();
-    if (!this.panel.autoZoom && savedView) {
+    if (savedView) {
+      // Use saved view as initial position to avoid jumping from [0, 0].
+      // When autoZoom is on, this is temporary until data arrives and zoomToFit runs.
       this.leafMap.setView([savedView.lat, savedView.lng], savedView.zoom);
     } else {
       this.leafMap.setView([0, 0], defaultZoom != null ? defaultZoom : 1);
@@ -729,14 +731,9 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.setupMap();
 
     if (!data || data.length === 0 || (data.length !== 2 && data.length !== 3)) {
-      // No data or incorrect data
-      if (!mapExisted) {
-        // First load with no data - show a world map
-        const defaultZoom = this.getConfiguredDefaultZoom();
-        this.leafMap.setView([0, 0], defaultZoom != null ? defaultZoom : 1);
-      }
-      // If the map already existed, keep current view position instead of
-      // resetting to [0, 0] (e.g. when a query times out on refresh)
+      // No data or incorrect data - keep current view position.
+      // setupMap already set the view to saved position or [0, 0] on first load,
+      // so no need to reset here (avoids jumping when data is still loading).
       this.render();
       return;
     }
