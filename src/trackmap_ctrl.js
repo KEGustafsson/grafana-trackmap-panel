@@ -575,9 +575,8 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
           this.leafMap.fitBounds(bounds);
         }
       }
-      else {
-        this.leafMap.setView([0, 0], defaultZoom != null ? defaultZoom : 1);
-      }
+      // If bounds are invalid, keep current view position instead of
+      // resetting to [0, 0] (initial view is already set by setupMap)
     }
     this.render();
   }
@@ -598,12 +597,18 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
 
   onDataReceived(data) {
     log("onDataReceived");
+    const mapExisted = !!this.leafMap;
     this.setupMap();
 
     if (!data || data.length === 0 || (data.length !== 2 && data.length !== 3)) {
-      // No data or incorrect data, show a world map and abort
-      const defaultZoom = this.getConfiguredDefaultZoom();
-      this.leafMap.setView([0, 0], defaultZoom != null ? defaultZoom : 1);
+      // No data or incorrect data
+      if (!mapExisted) {
+        // First load with no data - show a world map
+        const defaultZoom = this.getConfiguredDefaultZoom();
+        this.leafMap.setView([0, 0], defaultZoom != null ? defaultZoom : 1);
+      }
+      // If the map already existed, keep current view position instead of
+      // resetting to [0, 0] (e.g. when a query times out on refresh)
       this.render();
       return;
     }
