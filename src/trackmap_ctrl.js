@@ -567,6 +567,13 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     if (hasHeadingValue(coord.heading)) {
       tooltipLines.push(`Heading: ${normalizeHeading(coord.heading).toFixed(1)}\u00b0`);
     }
+    const radius = this.calculateDataRadius();
+    if (radius != null) {
+      const nm = radius.radiusNM;
+      const m = radius.radiusMeters;
+      const metricStr = m < 1000 ? `${m.toFixed(0)} m` : `${(m / 1000).toFixed(2)} km`;
+      tooltipLines.push(`Data radius: ${parseFloat(nm.toPrecision(4))} nm (${metricStr})`);
+    }
     this.lastMarker.bindTooltip(tooltipLines.join('<br>'), {
       direction: 'top',
       offset: [0, -12],
@@ -638,6 +645,38 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     }
     this.updateLastMarker();
     this.zoomToFit();
+  }
+
+  calculateDataRadius() {
+    // Only use real data points (antimeridian midpoints lack lat_show/lon_show)
+    const realCoords = this.coords.filter(c => c.lat_show != null && c.lon_show != null);
+    if (realCoords.length === 0) {
+      return null;
+    }
+
+    // Compute geographic centroid (mean lat/lon)
+    let latSum = 0;
+    let lonSum = 0;
+    realCoords.forEach(c => {
+      latSum += c.lat_show;
+      lonSum += c.lon_show;
+    });
+    const center = L.latLng(latSum / realCoords.length, lonSum / realCoords.length);
+
+    // Find maximum distance from centroid to any data point
+    let radiusMeters = 0;
+    realCoords.forEach(c => {
+      const dist = center.distanceTo(c.position);
+      if (dist > radiusMeters) {
+        radiusMeters = dist;
+      }
+    });
+
+    return {
+      center,
+      radiusMeters,
+      radiusNM: radiusMeters / METERS_PER_NM,
+    };
   }
 
   zoomToFit(){
