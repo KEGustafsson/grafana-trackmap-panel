@@ -254,6 +254,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.lastMarker = null;
     this.last = null;
     this.setSizePromise = null;
+    this._dataRetried = false;
 
     // Panel events
     this.events.on('panel-initialized', this.onInitialized.bind(this));
@@ -730,12 +731,16 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.setupMap();
 
     if (!data || data.length === 0 || (data.length !== 2 && data.length !== 3)) {
-      // No data or incorrect data - keep current view position.
-      // setupMap already set the view to saved position or [0, 0] on first load,
-      // so no need to reset here (avoids jumping when data is still loading).
+      // No data or incorrect data - retry once after a short delay in case
+      // the data source wasn't ready yet (e.g. on initial page load).
+      if (!this._dataRetried) {
+        this._dataRetried = true;
+        this.$timeout(() => this.refresh(), 1000);
+      }
       this.render();
       return;
     }
+    this._dataRetried = false;
 
     // Asumption is that there are an equal number of properly matched timestamps
     // TODO: proper joining by timestamp?
