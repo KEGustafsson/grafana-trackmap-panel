@@ -727,7 +727,6 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
 
   onDataReceived(data) {
     log("onDataReceived");
-    const mapExisted = !!this.leafMap;
     this.setupMap();
 
     if (!data || data.length === 0 || (data.length !== 2 && data.length !== 3)) {
