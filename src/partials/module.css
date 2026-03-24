@@ -7,6 +7,7 @@
 .trackmap-inner {
   height: 100%;
   width: 100%;
+  visibility: hidden;
 }
 .trackmap-last-tooltip {
   font-size: 12px;
