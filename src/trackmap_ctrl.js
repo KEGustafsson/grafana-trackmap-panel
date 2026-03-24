@@ -657,6 +657,13 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       );
     }
     this.updateLastMarker();
+
+    // Reveal the map now that data and marker are in place
+    const el = document.getElementById('trackmap-' + this.panel.id);
+    if (el) {
+      el.style.visibility = 'visible';
+    }
+
     this.zoomToFit();
   }
 
@@ -728,7 +735,6 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
 
   onDataReceived(data) {
     log("onDataReceived");
-    this.setupMap();
 
     if (!data || data.length === 0 || (data.length !== 2 && data.length !== 3)) {
       // No data or incorrect data - retry once after a short delay in case
@@ -741,6 +747,8 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       return;
     }
     this._dataRetried = false;
+
+    this.setupMap();
 
     // Asumption is that there are an equal number of properly matched timestamps
     // TODO: proper joining by timestamp?
