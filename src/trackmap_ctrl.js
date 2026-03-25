@@ -66,6 +66,95 @@ function getNearestHeadingValue(headings, targetTimestamp, toleranceMs = 1000) {
   return bestDiff <= toleranceMs ? best : null;
 }
 
+
+function getNearestPoint(datapoints, targetTimestamp, toleranceMs = 1000) {
+  if (!datapoints || datapoints.length === 0 || targetTimestamp == null) {
+    return null;
+  }
+
+  let min = 0;
+  let max = datapoints.length - 1;
+
+  while (min <= max) {
+    const idx = Math.floor((min + max) / 2);
+    const ts = datapoints[idx][1];
+    if (ts === targetTimestamp) {
+      return { value: datapoints[idx][0], timestamp: ts, diff: 0 };
+    } else if (ts < targetTimestamp) {
+      min = idx + 1;
+    } else {
+      max = idx - 1;
+    }
+  }
+
+  let best = null;
+  let bestDiff = Infinity;
+  [max, min].forEach((idx) => {
+    if (idx >= 0 && idx < datapoints.length) {
+      const diff = Math.abs(datapoints[idx][1] - targetTimestamp);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = datapoints[idx];
+      }
+    }
+  });
+
+  if (!best || bestDiff > toleranceMs) {
+    return null;
+  }
+
+  return { value: best[0], timestamp: best[1], diff: bestDiff };
+}
+
+function normalizeDatapoints(datapoints) {
+  if (!datapoints || datapoints.length === 0) {
+    return [];
+  }
+
+  return datapoints
+    .filter((p) => p && p[0] != null && p[1] != null)
+    .slice()
+    .sort((a, b) => a[1] - b[1]);
+}
+
+function estimateSeriesStep(datapoints) {
+  if (!datapoints || datapoints.length < 2) {
+    return null;
+  }
+
+  const deltas = [];
+  for (let i = 1; i < datapoints.length; i++) {
+    const prevTs = datapoints[i - 1][1];
+    const curTs = datapoints[i][1];
+    if (prevTs != null && curTs != null) {
+      const delta = curTs - prevTs;
+      if (delta > 0 && isFinite(delta)) {
+        deltas.push(delta);
+      }
+    }
+  }
+
+  if (deltas.length === 0) {
+    return null;
+  }
+
+  deltas.sort((a, b) => a - b);
+  return deltas[Math.floor(deltas.length / 2)];
+}
+
+function getLatLonMatchTolerance(lats, lons) {
+  const latStep = estimateSeriesStep(lats);
+  const lonStep = estimateSeriesStep(lons);
+  const minStep = [latStep, lonStep].filter((x) => x != null).reduce((acc, x) => Math.min(acc, x), Infinity);
+  if (!isFinite(minStep)) {
+    return 1000;
+  }
+
+  // Allow for datasource jitter and bucket boundary differences between
+  // latitude and longitude query series.
+  return Math.max(1000, Math.floor(minStep * 1.5));
+}
+
 function getMapViewStorage() {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -193,6 +282,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       defaultLayer: 'OpenStreetMap',
       showLayerChanger: true,
       showLastMarker: true,
+      persistPointTooltips: false,
       lineColor: 'red',
       pointColor: 'royalblue',
     });
@@ -252,6 +342,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.hoverTarget = null;
     this.hoverIndex = null;
     this.lastMarker = null;
+    this.historicTooltipMarkers = [];
     this.last = null;
     this.setSizePromise = null;
     this._dataRetried = false;
@@ -501,6 +592,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     if (this.leafMap) {
       this.polylines.forEach(p=>p.removeFrom(this.leafMap));
       this.removeLastMarker();
+      this.removeHistoricTooltipMarkers();
       this.onPanelClear();
       return;
     }
@@ -557,6 +649,31 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     }
   }
 
+  removeHistoricTooltipMarkers() {
+    this.historicTooltipMarkers.forEach((marker) => marker.removeFrom(this.leafMap));
+    this.historicTooltipMarkers = [];
+  }
+
+  makeTooltipContent(coord, title = 'Position') {
+    const lat = coord.lat_show != null ? coord.lat_show : coord.position.lat;
+    const lon = coord.lon_show != null ? coord.lon_show : coord.position.lng;
+    const lines = [
+      `<b>${title}</b>`,
+      `Lat: ${lat.toFixed(6)}`,
+      `Lon: ${lon.toFixed(6)}`,
+    ];
+
+    if (coord.timestamp != null && isFinite(coord.timestamp)) {
+      lines.push(`Time (UTC): ${moment.utc(coord.timestamp).format('YYYY-MM-DD HH:mm:ss')}`);
+      lines.push(`Time (Local): ${moment(coord.timestamp).format('YYYY-MM-DD HH:mm:ss')}`);
+    }
+    if (hasHeadingValue(coord.heading)) {
+      lines.push(`Heading: ${normalizeHeading(coord.heading).toFixed(1)}\u00b0`);
+    }
+
+    return lines.join('<br>');
+  }
+
   updateLastMarker() {
     this.removeLastMarker();
 
@@ -570,16 +687,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       zIndexOffset: 1000,
     }).addTo(this.leafMap);
 
-    const lat = coord.lat_show != null ? coord.lat_show : coord.position.lat;
-    const lon = coord.lon_show != null ? coord.lon_show : coord.position.lng;
-    let tooltipLines = [
-      `<b>Last Position</b>`,
-      `Lat: ${lat.toFixed(6)}`,
-      `Lon: ${lon.toFixed(6)}`,
-    ];
-    if (hasHeadingValue(coord.heading)) {
-      tooltipLines.push(`Heading: ${normalizeHeading(coord.heading).toFixed(1)}\u00b0`);
-    }
+    let tooltipLines = [this.makeTooltipContent(coord, 'Last Position')];
     const radius = this.calculateDataRadius();
     if (radius != null) {
       const nm = radius.radiusNM;
@@ -591,11 +699,50 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       direction: 'top',
       offset: [0, -12],
       className: 'trackmap-last-tooltip',
+      permanent: this.panel.persistPointTooltips,
     });
+  }
+
+  updateHistoricTooltipMarkers() {
+    this.removeHistoricTooltipMarkers();
+
+    if (!this.panel.persistPointTooltips || !this.coords || this.coords.length === 0) {
+      return;
+    }
+
+    for (let i = 0; i < this.coords.length; i++) {
+      if (i === this.last) {
+        continue;
+      }
+
+      const coord = this.coords[i];
+      if (!coord || coord.lat_show == null || coord.lon_show == null) {
+        continue;
+      }
+
+      const marker = L.circleMarker(coord.position, {
+        radius: 4,
+        color: this.panel.pointColor,
+        weight: 1,
+        fillColor: this.panel.pointColor,
+        fillOpacity: 0.9,
+        opacity: 1,
+      }).addTo(this.leafMap);
+
+      marker.bindTooltip(this.makeTooltipContent(coord, 'Historic Position'), {
+        direction: 'top',
+        className: 'trackmap-last-tooltip',
+        permanent: true,
+        opacity: 0.95,
+      });
+
+      this.historicTooltipMarkers.push(marker);
+    }
   }
 
   refreshLastMarker() {
     this.updateLastMarker();
+    this.updateHistoricTooltipMarkers();
     this.render();
   }
 
@@ -657,6 +804,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       );
     }
     this.updateLastMarker();
+    this.updateHistoricTooltipMarkers();
 
     // Reveal the map now that data and marker are in place
     const el = document.getElementById('trackmap-' + this.panel.id);
@@ -730,6 +878,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       this.hoverMarker.setIcon(makeDirectionIcon(this.panel.pointColor, this.coords[this.hoverIndex].heading, true));
     }
     this.updateLastMarker();
+    this.updateHistoricTooltipMarkers();
     this.render();
   }
 
@@ -755,19 +904,27 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.coords.length = 0;
     this.coordSlices.length = 0;
     this.coordSlices.push(0)
-    const lats = data[0].datapoints;
-    const lons = data[1].datapoints;
-    const headings = data.length === 3 ? data[2].datapoints.filter((p) => p && p[0] != null && p[1] != null) : null;
-    const pointCount = Math.min(lats.length, lons.length);
+    const lats = normalizeDatapoints(data[0].datapoints);
+    const lons = normalizeDatapoints(data[1].datapoints);
+    const headings = data.length === 3 ? normalizeDatapoints(data[2].datapoints) : null;
+    const lonToleranceMs = getLatLonMatchTolerance(lats, lons);
     this.last = null;
 
-    for (let i = 0; i < pointCount; i++) {
-      if (lats[i][0] == null || lons[i][0] == null ||
-          (lats[i][0] == 0 && lons[i][0] == 0) ||
-          lats[i][1] !== lons[i][1]) {
+    for (let i = 0; i < lats.length; i++) {
+      if (lats[i][0] == null || lats[i][1] == null) {
         continue;
       }
-      const pos = L.latLng(lats[i][0], lons[i][0])
+
+      const lonMatch = getNearestPoint(lons, lats[i][1], lonToleranceMs);
+      if (!lonMatch || lonMatch.value == null) {
+        continue;
+      }
+
+      if (lats[i][0] == 0 && lonMatch.value == 0) {
+        continue;
+      }
+
+      const pos = L.latLng(lats[i][0], lonMatch.value)
       let heading = headings ? getNearestHeadingValue(headings, lats[i][1]) : null;
 
       if (this.coords.length > 0){
@@ -793,7 +950,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
         position: pos,
         timestamp: lats[i][1],
         lat_show: lats[i][0],
-        lon_show: lons[i][0],
+        lon_show: lonMatch.value,
         heading: heading,
       });
       this.last = this.coords.length - 1;
