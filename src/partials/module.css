@@ -14,3 +14,9 @@
   line-height: 1.5;
   white-space: nowrap;
 }
+
+.trackmap-history-tooltip {
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+}

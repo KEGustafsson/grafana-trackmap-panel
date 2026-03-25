@@ -28,6 +28,8 @@
                     checked="ctrl.panel.showLayerChanger" on-change="ctrl.applyDefaultLayer()"></gf-form-switch>
     <gf-form-switch class="gf-form" label="Show last marker" label-class="width-11" tooltip="Show latest position marker (rotates with heading if available)"
                     checked="ctrl.panel.showLastMarker" on-change="ctrl.refreshLastMarker()"></gf-form-switch>
+    <gf-form-switch class="gf-form" label="Always show tooltips" label-class="width-11" tooltip="Keep tooltip visible and show tooltips for historical points"
+                    checked="ctrl.panel.showTooltipsAlways" on-change="ctrl.refreshLastMarker()"></gf-form-switch>
   </div>
   <div class="section gf-form-group">
     <h5 class="section-heading">Colors</h5>
