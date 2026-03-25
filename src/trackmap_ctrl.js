@@ -66,6 +66,95 @@ function getNearestHeadingValue(headings, targetTimestamp, toleranceMs = 1000) {
   return bestDiff <= toleranceMs ? best : null;
 }
 
+
+function getNearestPoint(datapoints, targetTimestamp, toleranceMs = 1000) {
+  if (!datapoints || datapoints.length === 0 || targetTimestamp == null) {
+    return null;
+  }
+
+  let min = 0;
+  let max = datapoints.length - 1;
+
+  while (min <= max) {
+    const idx = Math.floor((min + max) / 2);
+    const ts = datapoints[idx][1];
+    if (ts === targetTimestamp) {
+      return { value: datapoints[idx][0], timestamp: ts, diff: 0 };
+    } else if (ts < targetTimestamp) {
+      min = idx + 1;
+    } else {
+      max = idx - 1;
+    }
+  }
+
+  let best = null;
+  let bestDiff = Infinity;
+  [max, min].forEach((idx) => {
+    if (idx >= 0 && idx < datapoints.length) {
+      const diff = Math.abs(datapoints[idx][1] - targetTimestamp);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = datapoints[idx];
+      }
+    }
+  });
+
+  if (!best || bestDiff > toleranceMs) {
+    return null;
+  }
+
+  return { value: best[0], timestamp: best[1], diff: bestDiff };
+}
+
+function normalizeDatapoints(datapoints) {
+  if (!datapoints || datapoints.length === 0) {
+    return [];
+  }
+
+  return datapoints
+    .filter((p) => p && p[0] != null && p[1] != null)
+    .slice()
+    .sort((a, b) => a[1] - b[1]);
+}
+
+function estimateSeriesStep(datapoints) {
+  if (!datapoints || datapoints.length < 2) {
+    return null;
+  }
+
+  const deltas = [];
+  for (let i = 1; i < datapoints.length; i++) {
+    const prevTs = datapoints[i - 1][1];
+    const curTs = datapoints[i][1];
+    if (prevTs != null && curTs != null) {
+      const delta = curTs - prevTs;
+      if (delta > 0 && isFinite(delta)) {
+        deltas.push(delta);
+      }
+    }
+  }
+
+  if (deltas.length === 0) {
+    return null;
+  }
+
+  deltas.sort((a, b) => a - b);
+  return deltas[Math.floor(deltas.length / 2)];
+}
+
+function getLatLonMatchTolerance(lats, lons) {
+  const latStep = estimateSeriesStep(lats);
+  const lonStep = estimateSeriesStep(lons);
+  const minStep = [latStep, lonStep].filter((x) => x != null).reduce((acc, x) => Math.min(acc, x), Infinity);
+  if (!isFinite(minStep)) {
+    return 1000;
+  }
+
+  // Allow for datasource jitter and bucket boundary differences between
+  // latitude and longitude query series.
+  return Math.max(1000, Math.floor(minStep * 1.5));
+}
+
 function getMapViewStorage() {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -755,19 +844,27 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.coords.length = 0;
     this.coordSlices.length = 0;
     this.coordSlices.push(0)
-    const lats = data[0].datapoints;
-    const lons = data[1].datapoints;
-    const headings = data.length === 3 ? data[2].datapoints.filter((p) => p && p[0] != null && p[1] != null) : null;
-    const pointCount = Math.min(lats.length, lons.length);
+    const lats = normalizeDatapoints(data[0].datapoints);
+    const lons = normalizeDatapoints(data[1].datapoints);
+    const headings = data.length === 3 ? normalizeDatapoints(data[2].datapoints) : null;
+    const lonToleranceMs = getLatLonMatchTolerance(lats, lons);
     this.last = null;
 
-    for (let i = 0; i < pointCount; i++) {
-      if (lats[i][0] == null || lons[i][0] == null ||
-          (lats[i][0] == 0 && lons[i][0] == 0) ||
-          lats[i][1] !== lons[i][1]) {
+    for (let i = 0; i < lats.length; i++) {
+      if (lats[i][0] == null || lats[i][1] == null) {
         continue;
       }
-      const pos = L.latLng(lats[i][0], lons[i][0])
+
+      const lonMatch = getNearestPoint(lons, lats[i][1], lonToleranceMs);
+      if (!lonMatch || lonMatch.value == null) {
+        continue;
+      }
+
+      if (lats[i][0] == 0 && lonMatch.value == 0) {
+        continue;
+      }
+
+      const pos = L.latLng(lats[i][0], lonMatch.value)
       let heading = headings ? getNearestHeadingValue(headings, lats[i][1]) : null;
 
       if (this.coords.length > 0){
@@ -793,7 +890,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
         position: pos,
         timestamp: lats[i][1],
         lat_show: lats[i][0],
-        lon_show: lons[i][0],
+        lon_show: lonMatch.value,
         heading: heading,
       });
       this.last = this.coords.length - 1;
