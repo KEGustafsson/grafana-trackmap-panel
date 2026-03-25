@@ -282,6 +282,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       defaultLayer: 'OpenStreetMap',
       showLayerChanger: true,
       showLastMarker: true,
+      showTooltipsAlways: false,
       lineColor: 'red',
       pointColor: 'royalblue',
     });
@@ -341,6 +342,8 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.hoverTarget = null;
     this.hoverIndex = null;
     this.lastMarker = null;
+    this.tooltipToggleControl = null;
+    this.tooltipToggleInput = null;
     this.last = null;
     this.setSizePromise = null;
     this._dataRetried = false;
@@ -526,6 +529,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.hoverIndex = idx;
     this.hoverMarker.setIcon(makeDirectionIcon(this.panel.pointColor, this.coords[idx].heading, true));
     this.hoverMarker.setLatLng(this.coords[idx].position);
+    this.updateHoverTooltip();
     this.render();
   }
 
@@ -535,6 +539,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.hoverTarget = null;
     this.hoverIndex = null;
     if (this.hoverMarker) {
+      this.hoverMarker.unbindTooltip();
       this.hoverMarker.removeFrom(this.leafMap);
     }
   }
@@ -584,6 +589,45 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     this.addDataToMap();
   }
 
+  updateTooltipToggleControl() {
+    if (this.tooltipToggleInput) {
+      this.tooltipToggleInput.checked = Boolean(this.panel.showTooltipsAlways);
+      this.tooltipToggleInput.title = this.panel.showTooltipsAlways ? 'Permanent tooltips: ON' : 'Permanent tooltips: OFF';
+    }
+  }
+
+  addTooltipToggleControl() {
+    const ctrl = this;
+    const TooltipToggleControl = L.Control.extend({
+      options: { position: 'topright' },
+      onAdd(map) {
+        const container = L.DomUtil.create('div', 'leaflet-bar trackmap-tooltip-toggle');
+        const label = L.DomUtil.create('label', 'trackmap-tooltip-toggle-label', container);
+        const input = L.DomUtil.create('input', 'trackmap-tooltip-toggle-input', label);
+        input.type = 'checkbox';
+        input.checked = Boolean(ctrl.panel.showTooltipsAlways);
+
+        const text = L.DomUtil.create('span', 'trackmap-tooltip-toggle-text', label);
+        text.innerText = 'Tooltips';
+
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.disableScrollPropagation(container);
+        L.DomEvent.on(input, 'change', () => {
+          ctrl.panel.showTooltipsAlways = input.checked;
+          ctrl.refreshLastMarker();
+          ctrl.updateTooltipToggleControl();
+        });
+
+        ctrl.tooltipToggleInput = input;
+        ctrl.updateTooltipToggleControl();
+        return container;
+      },
+    });
+
+    this.tooltipToggleControl = new TooltipToggleControl();
+    this.leafMap.addControl(this.tooltipToggleControl);
+  }
+
   setupMap() {
     log("setupMap");
     // Create the map or get it back in a clean state if it already exists
@@ -631,6 +675,7 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
 
     // Scale control – nautical miles (top) and metric (bottom)
     makeScaleControl({ position: 'bottomleft', maxWidth: 150 }).addTo(this.leafMap);
+    this.addTooltipToggleControl();
 
     // Events
     this.leafMap.on('baselayerchange', this.mapBaseLayerChange.bind(this));
@@ -646,49 +691,78 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
     }
   }
 
-  updateLastMarker() {
-    this.removeLastMarker();
-
-    if (!this.panel.showLastMarker || this.last == null || !this.coords[this.last]) {
-      return;
-    }
-
-    const coord = this.coords[this.last];
-    this.lastMarker = L.marker(coord.position, {
-      icon: makeDirectionIcon(this.panel.pointColor, coord.heading, false),
-      zIndexOffset: 1000,
-    }).addTo(this.leafMap);
-
+  getPositionTooltipLines(coord, title = null, includeTime = false, includeHeading = false) {
     const lat = coord.lat_show != null ? coord.lat_show : coord.position.lat;
     const lon = coord.lon_show != null ? coord.lon_show : coord.position.lng;
-    let tooltipLines = [
-      `<b>Last Position</b>`,
-      `Lat: ${lat.toFixed(6)}`,
-      `Lon: ${lon.toFixed(6)}`,
-    ];
-    if (coord.timestamp != null && isFinite(coord.timestamp)) {
+    const tooltipLines = [];
+    if (title) {
+      tooltipLines.push(`<b>${title}</b>`);
+    }
+    tooltipLines.push(`Lat: ${lat.toFixed(6)}`);
+    tooltipLines.push(`Lon: ${lon.toFixed(6)}`);
+    if (includeTime && coord.timestamp != null && isFinite(coord.timestamp)) {
       tooltipLines.push(`Time (UTC): ${moment.utc(coord.timestamp).format('YYYY-MM-DD HH:mm:ss')}`);
       tooltipLines.push(`Time (Local): ${moment(coord.timestamp).format('YYYY-MM-DD HH:mm:ss')}`);
     }
-    if (hasHeadingValue(coord.heading)) {
+    if (includeHeading && hasHeadingValue(coord.heading)) {
       tooltipLines.push(`Heading: ${normalizeHeading(coord.heading).toFixed(1)}\u00b0`);
     }
-    const radius = this.calculateDataRadius();
-    if (radius != null) {
-      const nm = radius.radiusNM;
-      const m = radius.radiusMeters;
-      const metricStr = m < 1000 ? `${m.toFixed(0)} m` : `${(m / 1000).toFixed(2)} km`;
-      tooltipLines.push(`Data radius: ${parseFloat(nm.toPrecision(4))} nm (${metricStr})`);
+
+    return tooltipLines;
+  }
+
+  updateHoverTooltip() {
+    if (!this.hoverMarker || this.hoverIndex == null || !this.coords[this.hoverIndex]) {
+      return;
     }
-    this.lastMarker.bindTooltip(tooltipLines.join('<br>'), {
-      direction: 'top',
-      offset: [0, -12],
-      className: 'trackmap-last-tooltip',
-    });
+
+    if (this.panel.showTooltipsAlways) {
+      this.hoverMarker.bindTooltip(this.getPositionTooltipLines(this.coords[this.hoverIndex], 'Selected Position', true, true).join('<br>'), {
+        direction: 'top',
+        offset: [0, -12],
+        className: 'trackmap-history-tooltip',
+        permanent: true,
+      });
+      this.hoverMarker.openTooltip();
+    } else {
+      this.hoverMarker.unbindTooltip();
+    }
+  }
+
+  updateLastMarker() {
+    this.removeLastMarker();
+    if (this.panel.showLastMarker && this.last != null && this.coords[this.last]) {
+      const coord = this.coords[this.last];
+      this.lastMarker = L.marker(coord.position, {
+        icon: makeDirectionIcon(this.panel.pointColor, coord.heading, false),
+        zIndexOffset: 1000,
+      }).addTo(this.leafMap);
+
+      let tooltipLines = this.getPositionTooltipLines(coord, 'Last Position', true, true);
+      const radius = this.calculateDataRadius();
+      if (radius != null) {
+        const nm = radius.radiusNM;
+        const m = radius.radiusMeters;
+        const metricStr = m < 1000 ? `${m.toFixed(0)} m` : `${(m / 1000).toFixed(2)} km`;
+        tooltipLines.push(`Data radius: ${parseFloat(nm.toPrecision(4))} nm (${metricStr})`);
+      }
+      this.lastMarker.bindTooltip(tooltipLines.join('<br>'), {
+        direction: 'top',
+        offset: [0, -12],
+        className: 'trackmap-last-tooltip',
+        permanent: this.panel.showTooltipsAlways,
+      });
+
+      if (this.panel.showTooltipsAlways) {
+        this.lastMarker.openTooltip();
+      }
+    }
   }
 
   refreshLastMarker() {
     this.updateLastMarker();
+    this.updateHoverTooltip();
+    this.updateTooltipToggleControl();
     this.render();
   }
 
