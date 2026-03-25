@@ -666,6 +666,10 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
       `Lat: ${lat.toFixed(6)}`,
       `Lon: ${lon.toFixed(6)}`,
     ];
+    if (coord.timestamp != null && isFinite(coord.timestamp)) {
+      tooltipLines.push(`Time (UTC): ${moment.utc(coord.timestamp).format('YYYY-MM-DD HH:mm:ss')}`);
+      tooltipLines.push(`Time (Local): ${moment(coord.timestamp).format('YYYY-MM-DD HH:mm:ss')}`);
+    }
     if (hasHeadingValue(coord.heading)) {
       tooltipLines.push(`Heading: ${normalizeHeading(coord.heading).toFixed(1)}\u00b0`);
     }
