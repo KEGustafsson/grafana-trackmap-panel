@@ -686,9 +686,23 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
 
   removeLastMarker() {
     if (this.lastMarker) {
+      this.lastMarker.closeTooltip();
+      this.lastMarker.unbindTooltip();
       this.lastMarker.removeFrom(this.leafMap);
       this.lastMarker = null;
     }
+  }
+
+  clearMapTooltips() {
+    if (!this.leafMap) {
+      return;
+    }
+
+    this.leafMap.eachLayer((layer) => {
+      if (layer instanceof L.Tooltip) {
+        this.leafMap.closeTooltip(layer);
+      }
+    });
   }
 
   getPositionTooltipLines(coord, title = null, includeTime = false, includeHeading = false) {
@@ -712,7 +726,14 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
   }
 
   updateHoverTooltip() {
-    if (!this.hoverMarker || this.hoverIndex == null || !this.coords[this.hoverIndex]) {
+    if (!this.hoverMarker) {
+      return;
+    }
+
+    this.hoverMarker.closeTooltip();
+    this.hoverMarker.unbindTooltip();
+
+    if (this.hoverIndex == null || !this.coords[this.hoverIndex]) {
       return;
     }
 
@@ -750,18 +771,17 @@ export class TrackMapCtrl extends MetricsPanelCtrl {
         direction: 'top',
         offset: [0, -12],
         className: 'trackmap-last-tooltip',
-        permanent: this.panel.showTooltipsAlways,
+        permanent: false,
       });
-
-      if (this.panel.showTooltipsAlways) {
-        this.lastMarker.openTooltip();
-      }
     }
   }
 
   refreshLastMarker() {
     this.updateLastMarker();
     this.updateHoverTooltip();
+    if (!this.panel.showTooltipsAlways) {
+      this.clearMapTooltips();
+    }
     this.updateTooltipToggleControl();
     this.render();
   }
